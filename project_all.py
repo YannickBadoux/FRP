@@ -16,16 +16,24 @@ from astropy.table import Table
 from npy_append_array import NpyAppendArray
 import glob
 
-def distance(df):
-    '''Calculate distance in parsecs from parallax in mas'''
+def distance(df)->np.ndarray:
+    '''Calculate distance in parsecs from parallax in mas
+
+    Parameters:
+    df: DataFrame or Table containing the parallax values, with key: 'parallax
+    '''
     try:
         d = 1/(1e-3*np.abs(df['parallax']))
     except KeyError:
         d = 1/(1e-3*np.abs(df['parallax_x']))
     return d
 
-def abs_gmag(df):
-    '''Calculate absolute G band magnitude'''
+def abs_gmag(df)->np.ndarray:
+    '''Calculate absolute G band magnitude
+    
+    Parameters:
+    df: DataFrame or Table containing the apparent G band magnitude and parallax values, with key: 'phot_g_mean_mag', 'parallax'
+    '''
     d = distance(df)
     try:
         absG = df["phot_g_mean_mag"] - 5*np.log10(d) + 5
@@ -171,20 +179,14 @@ if __name__ == '__main__':
 
 
     #----------------------------------UMAP projection----------------------------------
-
-    #------------------------------
-    nn = args.nn
-    md = args.md
-    rs = args.rs #random state
-    print(f'Fitting UMAP model with: nn = {nn}, md = {md}, rs = {rs}')
-    #------------------------------
+    print(f'Fitting UMAP model with: nn = {args.nn}, md = {args.md}, rs = {args.rs}')
 
     data = norm_coeffs_train #training data
     test_data = norm_coeffs_test #testing data
 
     mtitle = 'normalized coefficients'
 
-    reducer = umap.UMAP(n_neighbors = nn, min_dist = md, random_state=rs)
+    reducer = umap.UMAP(n_neighbors = args.nn, min_dist = args.md, random_state=args.rs)
 
     #fit model
     start_time = time.time()
@@ -199,8 +201,8 @@ if __name__ == '__main__':
 
     #if it is the first run, save the train and test embedding and plot them
     if args.run_number == 1:
-        np.save(f'UMAP_embeddings/train_embedding_nn{nn}_md{md}_rs{rs}.npy', embedding)
-        np.save(f'UMAP_embeddings/test_embedding_nn{nn}_md{md}_rs{rs}.npy', test_embedding)
+        np.save(f'UMAP_embeddings/train_embedding_nn{args.nn}_md{args.md}_rs{args.rs}.npy', embedding)
+        np.save(f'UMAP_embeddings/test_embedding_nn{args.nn}_md{args.md}_rs{args.rs}.npy', test_embedding)
         print('Projection done')
 
         #plot training data
@@ -210,7 +212,7 @@ if __name__ == '__main__':
 
         #plot the training data
         fig, axs = plt.subplots(2,2,figsize=(20,22), height_ratios=[1,1.1], sharex=True, sharey=True)
-        fig.suptitle(f'UMAP projection of training {mtitle} with nn = {nn}, md = {md}')
+        fig.suptitle(f'UMAP projection of training {mtitle} with nn = {args.nn}, md = {args.md}')
 
         #labels
         axs[0,0].scatter(embedding[tr_hot_mask,0], embedding[tr_hot_mask,1], s=3, zorder=100, label = 'Hot stars')
@@ -234,7 +236,9 @@ if __name__ == '__main__':
         fig.colorbar(axs[1,1].collections[0], ax=axs[1,1], label='BP-RP', location='bottom', fraction=0.046, pad=0.04)
 
         fig.tight_layout()
-        plt.savefig(f'UMAP_figures/all_sources_phot_g_nn{nn}_md{md}_rs{rs}_train.png', bbox_inches='tight')
+        plt.savefig(f'UMAP_figures/all_sources_phot_g_nn{args.nn}_md{args.md}_rs{args.rs}_train.png', bbox_inches='tight')
+
+
 
         #plot test data
         test_hot_mask = (X_test['src_df'] == 'rz') | (X_test['src_df'] == 'hs') | (X_test['src_df'] == 'hlms') | (X_test['blue_giant'])
@@ -243,7 +247,7 @@ if __name__ == '__main__':
 
         #plot the test data
         fig, axs = plt.subplots(2,2,figsize=(20,22), height_ratios=[1,1.1], sharex=True, sharey=True)
-        fig.suptitle(f'UMAP projection of test {mtitle} with nn = {nn}, md = {md}')
+        fig.suptitle(f'UMAP projection of test {mtitle} with nn = {args.nn}, md = {args.md}')
 
         #labels
         axs[0,0].scatter(test_embedding[test_hot_mask,0], test_embedding[test_hot_mask,1], s=3, zorder=100, label = 'Hot stars')
@@ -267,21 +271,24 @@ if __name__ == '__main__':
         fig.colorbar(axs[1,1].collections[0], ax=axs[1,1], label='BP-RP', location='bottom', fraction=0.046, pad=0.04)
 
         fig.tight_layout()
-        plt.savefig(f'UMAP_figures/all_sources_phot_g_nn{nn}_md{md}_rs{rs}_test.png', bbox_inches='tight')
+        plt.savefig(f'UMAP_figures/all_sources_phot_g_nn{args.nn}_md{args.md}_rs{args.rs}_test.png', bbox_inches='tight')
 
     #project all data using the fitted model
     idx = args.run_number-1
 
     #path to folder with normalised coefficients
     norm_coeff_path = 'norm_coefficients'
-    
+
     flist = glob.glob(norm_coeff_path)[idx::args.n_nodes] #every nth file
-    for f in flist:
+
+    #save path
+    save_path = ''
+
+    for i,f in enumerate(flist):
         print(f'Processing {f}')
         data = np.load(f)
-        embedding = reducer.transform(data[:,1:])
-        to_save = np.concatenate((data[:,0], embedding), axis=1)
+        embedding = reducer.transform(data[:,1:]) #project data into the learnt space
 
-        with NpyAppendArray(f'/home/s2562898/data1/UMAP_embedding_all_sources/all_sources_UMAP_embedding_run{idx}.npy') as savefile:
-            savefile.append(to_save)
-
+        #save the embedding
+        tab = Table([data[:,0], embedding], names=['source_id', 'embedding'], dtype=[np.int64, np.ndarray])
+        Table.write(tab, save_path + f'{idx}_{i}_embedding.fits', format='fits')
